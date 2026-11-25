@@ -1,27 +1,41 @@
-name: intern-task-terraform ci
+name: intern-task-terraform-ci
 
 on:
   pull_request:
     paths:
       - "intern-task-terraform/**"
+      - ".github/workflows/intern-task-terraform-ci.yml"
+
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - "intern-task-terraform/**"
+      - ".github/workflows/intern-task-terraform-ci.yml"
+
   workflow_dispatch:
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.12.0"
+          terraform_version: "1.14.5"
 
-      - name: Format check
+      - name: Check formatting
+        working-directory: intern-task-terraform/terraform
         run: terraform fmt -check -recursive
 
-      - name: Validate
+      - name: Initialize Terraform
+        working-directory: intern-task-terraform/terraform
+        run: terraform init -backend=false -input=false
+
+      - name: Validate Terraform
+        working-directory: intern-task-terraform/terraform
         run: terraform validate
