@@ -1,0 +1,81 @@
+#!/bin/bash
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+# Create a non-root administrator
+if ! id appadmin >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash --groups sudo appadmin
+fi
+
+# Configure passwordless sudo
+echo "appadmin ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/appadmin
+chmod 0440 /etc/sudoers.d/appadmin
+# Update package lists
+apt-get update -y
+
+# Install Docker and UFW firewall
+apt-get install -y docker.io ufw
+
+# Enable Docker
+systemctl enable docker
+systemctl start docker
+
+# Allow appadmin to use Docker
+usermod -aG docker appadmin
+
+# Create application directories
+mkdir -p /opt/intern-task-app/app
+
+# Set directory ownership
+chown -R appadmin:appadmin /opt/intern-task-app
+
+# Transfer the Task 1 Dockerfile to EC2
+echo "${dockerfile_b64}" | base64 --decode > /opt/intern-task-app/Dockerfile
+
+# Transfer the Task 1 Python application to EC2
+echo "${app_source_b64}" | base64 --decode > /opt/intern-task-app/app/app.py
+
+# Set application ownership
+chown -R appadmin:appadmin /opt/intern-task-app
+
+# Build the same Docker image used in Task 1
+docker build -t intern-task-app:local /opt/intern-task-app
+# Create a systemd service for the application
+cat > /etc/systemd/system/intern-task-app.service <<EOF
+[Unit]
+Description=Intern Task Application Container
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f intern-task-app
+ExecStart=/usr/bin/docker run --name intern-task-app --publish ${app_port}:${app_port} --env PORT=${app_port} intern-task-app:local
+ExecStop=/usr/bin/docker stop intern-task-app
+ExecStopPost=-/usr/bin/docker rm -f intern-task-app
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start the application service
+systemctl daemon-reload
+systemctl enable --now intern-task-app.service
+# Configure UFW firewall
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH only from the configured CIDR
+ufw allow from ${ssh_cidr} to any port 22 proto tcp
+
+# Allow application traffic
+ufw allow ${app_port}/tcp
+
+# Enable the firewall
+ufw --force enable
+
+# Verify firewall rules
+ufw status verbose
